@@ -1,4 +1,8 @@
 import torch
+# Monkey patch for float8_e8m0fnu compatibility between PyTorch and Transformers
+if not hasattr(torch, "float8_e8m0fnu"):
+    setattr(torch, "float8_e8m0fnu", torch.float32)
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
