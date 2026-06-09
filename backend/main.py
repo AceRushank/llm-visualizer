@@ -36,19 +36,22 @@ def load_model():
         if device == "cuda":
             model = AutoModelForCausalLM.from_pretrained(
                 model_name,
-                torch_dtype=torch.float16
+                torch_dtype=torch.float16,
+                attn_implementation="eager"
             ).to("cuda")
         else:
             model = AutoModelForCausalLM.from_pretrained(
                 model_name,
-                torch_dtype=torch.float32
+                torch_dtype=torch.float32,
+                attn_implementation="eager"
             ).to("cpu")
     except Exception as e:
         print(f"Failed to load on CUDA: {e}. Falling back to CPU.")
         device = "cpu"
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=torch.float32
+            torch_dtype=torch.float32,
+            attn_implementation="eager"
         ).to("cpu")
     print(f"Model successfully loaded on {device}.")
 
