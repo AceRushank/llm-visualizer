@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+@theme {
+  --color-tn-base:       #1a1b2e;
+  --color-tn-panel:      #16213e;
+  --color-tn-highlight:  #0f3460;
+  --color-tn-border:     #292e42;
+  --color-tn-text:       #c0caf5;
+  --color-tn-muted:      #565f89;
+  --color-tn-purple:     #bb9af7;
+  --color-tn-blue:       #7aa2f7;
+  --color-tn-cyan:       #7dcfff;
+  --color-tn-green:      #9ece6a;
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+}
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  font-family: 'Inter', sans-serif;
+  background-color: #1a1b2e;
+  color: #c0caf5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #1a1b2e; }
+::-webkit-scrollbar-thumb { background: #292e42; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #565f89; }
+
+/* ─── Keyframe animations ─────────────────────────────────── */
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+@keyframes shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%);  }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 6px rgba(187,154,247,0.4); }
+  50%       { box-shadow: 0 0 20px rgba(187,154,247,0.8), 0 0 40px rgba(187,154,247,0.3); }
+}
+
+/* ─── Utility classes for custom keyframes ────────────────── */
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.35s ease forwards;
+  opacity: 0;
+}
+
+.animate-shimmer {
+  animation: shimmer 1.5s infinite linear;
+}
+
+.animate-blink {
+  animation: blink 0.85s step-start infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
