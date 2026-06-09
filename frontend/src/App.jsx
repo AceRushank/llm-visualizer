@@ -5,42 +5,78 @@ import AttentionHeatmap from './components/AttentionHeatmap'
 import ResponseBox from './components/ResponseBox'
 
 const API_URL = 'http://localhost:8000/api/analyze'
+const TABS = ['Telemetry Stream', 'Attention Matrix']
 
-// ─── Reusable sub-components ────────────────────────────────────────────────
-
-function PanelHeader({ icon, title }) {
-  return (
-    <div className="flex items-center gap-2 px-4 py-2 border-b border-tn-border bg-tn-panel shrink-0">
-      <span className="text-tn-purple text-xs">{icon}</span>
-      <span className="font-mono text-[10px] text-tn-muted uppercase tracking-widest">
-        {title}
-      </span>
-    </div>
-  )
-}
+// ─── Skeleton shimmer overlay ────────────────────────────────────────────────
 
 function SkeletonOverlay({ show }) {
   if (!show) return null
   return (
-    <div className="absolute inset-0 z-20 rounded-lg overflow-hidden
-                    bg-tn-panel/80 backdrop-blur-[2px] flex items-center justify-center">
-      {/* Shimmer sweep */}
+    <div className="absolute inset-0 z-20 rounded-2xl overflow-hidden
+                    bg-tn-panel/70 backdrop-blur-[3px] flex items-center justify-center">
       <div
         className="absolute inset-0 animate-shimmer pointer-events-none"
         style={{
-          background:
-            'linear-gradient(90deg, transparent 0%, rgba(187,154,247,0.07) 50%, transparent 100%)',
+          background: 'linear-gradient(90deg, transparent 0%, rgba(187,154,247,0.08) 50%, transparent 100%)',
           width: '50%',
         }}
       />
-      <span className="font-mono text-xs text-tn-purple animate-pulse relative z-10">
-        Analyzing…
+      <span className="font-mono text-xs text-tn-purple animate-pulse relative z-10 tracking-widest">
+        analyzing…
       </span>
     </div>
   )
 }
 
-// ─── Main App ───────────────────────────────────────────────────────────────
+// ─── Empty state ─────────────────────────────────────────────────────────────
+
+function EmptyState({ text }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-20 gap-3">
+      <span className="text-3xl opacity-20">◈</span>
+      <p className="font-mono text-xs text-tn-muted italic">{text}</p>
+    </div>
+  )
+}
+
+// ─── Tab Switcher ─────────────────────────────────────────────────────────────
+
+function TabBar({ active, onChange }) {
+  return (
+    <div className="flex items-center gap-1 p-1 rounded-xl bg-tn-panel border border-tn-border w-fit">
+      {TABS.map(tab => (
+        <button
+          key={tab}
+          onClick={() => onChange(tab)}
+          className={[
+            'px-4 py-1.5 rounded-lg font-mono text-xs tracking-wide',
+            'transition-all duration-200',
+            active === tab
+              ? 'bg-tn-purple text-tn-base font-bold shadow-sm'
+              : 'text-tn-muted hover:text-tn-text',
+          ].join(' ')}
+        >
+          {tab}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ─── Fade wrapper for tab content ─────────────────────────────────────────────
+
+function FadePanel({ visible, children }) {
+  return (
+    <div
+      className="transition-opacity duration-300 ease-in-out"
+      style={{ opacity: visible ? 1 : 0, pointerEvents: visible ? 'auto' : 'none' }}
+    >
+      {children}
+    </div>
+  )
+}
+
+// ─── Main App ────────────────────────────────────────────────────────────────
 
 export default function App() {
   const [inputText, setInputText]   = useState('')
@@ -49,12 +85,12 @@ export default function App() {
   const [attentions, setAttentions] = useState([])
   const [completion, setCompletion] = useState('')
   const [error, setError]           = useState(null)
+  const [activeTab, setActiveTab]   = useState(TABS[0])
 
   const handleAnalyze = async () => {
     if (!inputText.trim() || loading) return
     setLoading(true)
     setError(null)
-
     try {
       const { data } = await axios.post(API_URL, { text: inputText })
       setTokens(data.tokens)
@@ -62,8 +98,8 @@ export default function App() {
       setCompletion(data.completion)
     } catch (e) {
       setError(
-        e?.response?.data?.detail
-          ?? 'Backend error — is the uvicorn server running on port 8000?'
+        e?.response?.data?.detail ??
+        'Backend error — is uvicorn running on port 8000?'
       )
     } finally {
       setLoading(false)
@@ -77,106 +113,132 @@ export default function App() {
   const hasData = tokens.length > 0
 
   return (
-    <div className="min-h-screen bg-tn-base text-tn-text flex flex-col">
+    <div className="min-h-screen bg-tn-base text-tn-text">
 
-      {/* ── Header ─────────────────────────────────────────────────── */}
-      <header className="flex items-center justify-between gap-4 px-6 py-3
-                         border-b border-tn-border bg-tn-panel shrink-0">
-        <div className="flex items-center gap-3">
-          <span className="text-tn-purple font-mono font-bold text-base tracking-tight">
-            ◈ LLM Visualizer
-          </span>
-          <span className="hidden sm:inline font-mono text-[10px] text-tn-muted
-                           border border-tn-border rounded px-2 py-0.5">
-            TinyLlama-1.1B-Chat · CUDA · eager attn
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-tn-green animate-pulse" />
-          <span className="font-mono text-[10px] text-tn-muted">api:8000</span>
+      {/* ── Top header bar ──────────────────────────────────────────── */}
+      <header className="border-b border-tn-border bg-tn-panel">
+        <div className="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-tn-purple font-mono font-bold text-sm tracking-tight">
+              ◈ LLM Visualizer
+            </span>
+            <span className="hidden sm:inline font-mono text-[10px] text-tn-muted
+                             border border-tn-border rounded-md px-2 py-0.5">
+              TinyLlama-1.1B · CUDA · eager
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-tn-green animate-pulse" />
+            <span className="font-mono text-[10px] text-tn-muted">api:8000</span>
+          </div>
         </div>
       </header>
 
-      {/* ── Input Row ──────────────────────────────────────────────── */}
-      <div className="flex gap-3 px-4 py-3 border-b border-tn-border bg-tn-panel shrink-0">
-        <textarea
-          id="analyze-input"
-          className="flex-1 resize-y min-h-[72px] bg-tn-base border border-tn-border
-                     rounded-md px-4 py-2.5 font-mono text-sm text-tn-text
-                     placeholder:text-tn-muted
-                     focus:outline-none focus:ring-2 focus:ring-tn-purple
-                     transition-shadow duration-200"
-          placeholder="Enter text to analyze tokens and attention…  (Ctrl+Enter to submit)"
-          value={inputText}
-          onChange={e => setInputText(e.target.value)}
-          onKeyDown={handleKeyDown}
-        />
-        <button
-          id="analyze-btn"
-          onClick={handleAnalyze}
-          disabled={loading || !inputText.trim()}
-          className="px-6 py-2 rounded-md bg-tn-purple text-tn-base font-bold font-mono
-                     text-sm self-start mt-0.5 whitespace-nowrap
-                     hover:bg-[#9d7cd8] active:scale-95
-                     disabled:opacity-40 disabled:cursor-not-allowed
-                     transition-all duration-150"
-        >
-          {loading ? '⏳ Analyzing…' : '⚡ Analyze'}
-        </button>
-      </div>
+      {/* ── Centered workspace ──────────────────────────────────────── */}
+      <main className="max-w-5xl mx-auto px-6 py-10 flex flex-col gap-8">
 
-      {/* ── Error banner ───────────────────────────────────────────── */}
-      {error && (
-        <div className="mx-4 mt-3 px-4 py-2 rounded-md border border-red-500/40
-                        bg-red-500/10 font-mono text-xs text-red-400">
-          ✕ {error}
-        </div>
-      )}
-
-      {/* ── Main split-pane grid ───────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.6fr] gap-4 p-4 flex-1 min-h-0">
-
-        {/* LEFT — Token Strip */}
-        <div className="relative flex flex-col rounded-lg border border-tn-border
-                        bg-tn-panel overflow-hidden min-h-[200px]">
-          <PanelHeader icon="⬡" title="Token Strip" />
-          <SkeletonOverlay show={loading} />
-          <div className="overflow-y-auto flex-1">
-            {hasData
-              ? <TokenStrip tokens={tokens} />
-              : <EmptyState text="Token analysis will appear here" />
-            }
+        {/* ── Input block ─────────────────────────────────────────── */}
+        <section className="flex flex-col gap-3">
+          <label className="font-mono text-[10px] text-tn-muted uppercase tracking-widest">
+            Input Prompt
+          </label>
+          <div className="flex gap-3 items-start">
+            <textarea
+              id="analyze-input"
+              className="flex-1 resize-y min-h-[88px] bg-tn-panel border border-tn-border
+                         rounded-xl px-5 py-3.5 font-mono text-sm text-tn-text
+                         placeholder:text-tn-muted/60
+                         focus:outline-none focus:ring-2 focus:ring-tn-purple/60
+                         transition-shadow duration-200 leading-relaxed"
+              placeholder="Enter text to analyze tokens and attention…  (Ctrl+Enter)"
+              value={inputText}
+              onChange={e => setInputText(e.target.value)}
+              onKeyDown={handleKeyDown}
+            />
+            <button
+              id="analyze-btn"
+              onClick={handleAnalyze}
+              disabled={loading || !inputText.trim()}
+              className="px-6 py-3 rounded-xl bg-tn-purple text-tn-base font-bold font-mono
+                         text-sm whitespace-nowrap shrink-0
+                         hover:bg-[#9d7cd8] active:scale-95
+                         disabled:opacity-35 disabled:cursor-not-allowed
+                         transition-all duration-150 shadow-lg shadow-tn-purple/20"
+            >
+              {loading ? '⏳' : '⚡ Analyze'}
+            </button>
           </div>
-        </div>
 
-        {/* RIGHT — Attention Heatmap */}
-        <div className="relative flex flex-col rounded-lg border border-tn-border
-                        bg-tn-panel overflow-hidden min-h-[200px]">
-          <PanelHeader icon="◫" title="Attention Heatmap" />
-          <SkeletonOverlay show={loading} />
-          <div className="overflow-auto flex-1">
-            {hasData
-              ? <AttentionHeatmap attentions={attentions} tokens={tokens} />
-              : <EmptyState text="Attention matrix will appear here" />
-            }
+          {/* Error */}
+          {error && (
+            <div className="px-4 py-2.5 rounded-xl border border-red-500/30
+                            bg-red-500/8 font-mono text-xs text-red-400">
+              ✕ {error}
+            </div>
+          )}
+        </section>
+
+        {/* ── Tab switcher ────────────────────────────────────────── */}
+        <TabBar active={activeTab} onChange={setActiveTab} />
+
+        {/* ── Tab content panels (both mounted, opacity cross-fade) ── */}
+        <section className="relative">
+
+          {/* Tab 1 — Telemetry Stream */}
+          <FadePanel visible={activeTab === TABS[0]}>
+            <div className="flex flex-col gap-6">
+
+              {/* Token Strip panel */}
+              <div className="relative rounded-2xl border border-tn-border/60 bg-tn-panel overflow-hidden">
+                <div className="flex items-center gap-2 px-5 py-3 border-b border-tn-border/40">
+                  <span className="text-tn-purple text-[10px]">⬡</span>
+                  <span className="font-mono text-[10px] text-tn-muted uppercase tracking-widest">
+                    Token Strip
+                  </span>
+                </div>
+                <SkeletonOverlay show={loading} />
+                {hasData
+                  ? <TokenStrip tokens={tokens} />
+                  : <EmptyState text="Token analysis will appear here" />
+                }
+              </div>
+
+              {/* Response Box panel */}
+              <div className="relative rounded-2xl border border-tn-border/60 overflow-hidden">
+                <SkeletonOverlay show={loading} />
+                <ResponseBox completion={completion} />
+              </div>
+
+            </div>
+          </FadePanel>
+
+          {/* Tab 2 — Attention Matrix (absolute, same space) */}
+          <div
+            className="transition-opacity duration-300 ease-in-out"
+            style={{
+              opacity: activeTab === TABS[1] ? 1 : 0,
+              pointerEvents: activeTab === TABS[1] ? 'auto' : 'none',
+              position: activeTab === TABS[0] ? 'absolute' : 'static',
+              inset: 0,
+            }}
+          >
+            <div className="relative rounded-2xl border border-tn-border/60 bg-tn-panel overflow-hidden">
+              <div className="flex items-center gap-2 px-5 py-3 border-b border-tn-border/40">
+                <span className="text-tn-purple text-[10px]">◫</span>
+                <span className="font-mono text-[10px] text-tn-muted uppercase tracking-widest">
+                  Attention Matrix
+                </span>
+              </div>
+              <SkeletonOverlay show={loading} />
+              {hasData
+                ? <AttentionHeatmap attentions={attentions} tokens={tokens} />
+                : <EmptyState text="Attention matrix will appear here" />
+              }
+            </div>
           </div>
-        </div>
-      </div>
 
-      {/* ── Bottom — Response Box ──────────────────────────────────── */}
-      <div className="relative px-4 pb-4 shrink-0">
-        <ResponseBox completion={completion} />
-      </div>
-    </div>
-  )
-}
-
-// ─── Empty state placeholder ────────────────────────────────────────────────
-
-function EmptyState({ text }) {
-  return (
-    <div className="flex items-center justify-center h-full min-h-[120px]">
-      <p className="font-mono text-xs text-tn-muted italic">{text}</p>
+        </section>
+      </main>
     </div>
   )
 }

@@ -2,9 +2,8 @@ import React, { useState } from 'react'
 
 /**
  * AttentionHeatmap
- * Renders an HTML range slider to scrub layers 0–21 and a unified CSS grid
- * matrix with rotated -45° X-axis token labels. Cells cross-fade via
- * Tailwind transition-all duration-300 ease-in-out on layer change.
+ * Full-width, centered matrix with a unified CSS grid parent, layer slider,
+ * rotated -45° X-axis labels, and soft cell borders.
  *
  * Props:
  *   attentions — number[][][] shape [layers, seq_len, seq_len]
@@ -15,15 +14,16 @@ export default function AttentionHeatmap({ attentions, tokens }) {
 
   if (!attentions?.length || !tokens?.length) return null
 
-  const matrix  = attentions[activeLayer]
-  const seqLen  = tokens.length
-  const maxVal  = Math.max(...matrix.flat())
+  const matrix = attentions[activeLayer]
+  const seqLen = tokens.length
+  const maxVal = Math.max(...matrix.flat())
 
   return (
-    <div className="p-4 flex flex-col gap-4">
-      {/* ── Layer Slider ─────────────────────────────────────────── */}
-      <div className="flex items-center gap-3">
-        <span className="font-mono text-xs text-tn-muted whitespace-nowrap">
+    <div className="px-8 py-6 flex flex-col gap-6">
+
+      {/* ── Layer slider ──────────────────────────────────────────── */}
+      <div className="flex items-center gap-4 max-w-lg mx-auto w-full">
+        <span className="font-mono text-[10px] text-tn-muted uppercase tracking-widest whitespace-nowrap">
           Layer
         </span>
         <input
@@ -32,34 +32,35 @@ export default function AttentionHeatmap({ attentions, tokens }) {
           max={attentions.length - 1}
           value={activeLayer}
           onChange={e => setActiveLayer(Number(e.target.value))}
-          className="flex-1 h-1 cursor-pointer accent-tn-purple"
+          className="flex-1 h-0.5 cursor-pointer accent-tn-purple"
         />
-        <span className="font-mono text-xs text-tn-purple w-14 text-right whitespace-nowrap">
-          {activeLayer} / {attentions.length - 1}
+        <span className="font-mono text-xs text-tn-purple w-14 text-right whitespace-nowrap tabular-nums">
+          {String(activeLayer).padStart(2, '0')} / {attentions.length - 1}
         </span>
       </div>
 
-      {/* ── Unified Grid: X-axis headers + data rows ─────────────── */}
-      <div className="overflow-auto pb-2">
+      {/* ── Centered unified grid ─────────────────────────────────── */}
+      <div className="overflow-auto flex justify-center pb-4">
         <div
           className="grid items-center"
           style={{
-            gridTemplateColumns: `40px repeat(${seqLen}, 32px)`,
+            gridTemplateColumns: `48px repeat(${seqLen}, 36px)`,
             rowGap: '4px',
           }}
         >
-          {/* ── X-Axis header row ─────────────────────────────────── */}
-          {/* Top-left corner spacer */}
+          {/* ── X-axis header row ─────────────────────────────────── */}
+
+          {/* Corner spacer */}
           <div />
 
-          {/* Rotated column labels */}
+          {/* Rotated column labels — -45° so text never clashes */}
           {tokens.map((t, i) => (
             <div
               key={`col-${i}`}
-              className="flex items-end justify-center h-14 overflow-visible"
+              className="flex items-end justify-center h-16 overflow-visible"
             >
               <span
-                className="font-mono text-[9px] text-tn-muted whitespace-nowrap"
+                className="font-mono text-[9px] text-tn-muted/80 whitespace-nowrap"
                 style={{
                   display: 'block',
                   transform: 'rotate(-45deg) translateX(-4px)',
@@ -74,26 +75,29 @@ export default function AttentionHeatmap({ attentions, tokens }) {
           {/* ── Matrix data rows ──────────────────────────────────── */}
           {matrix.map((row, rowIdx) => (
             <React.Fragment key={`row-${rowIdx}`}>
+
               {/* Y-axis row label */}
-              <div className="flex items-center justify-end pr-1.5 h-8">
-                <span className="font-mono text-[9px] text-tn-muted truncate max-w-[36px]">
+              <div className="flex items-center justify-end pr-2 h-9">
+                <span className="font-mono text-[9px] text-tn-muted/80 truncate max-w-[42px]">
                   {tokens[rowIdx]?.token || '<s>'}
                 </span>
               </div>
 
-              {/* Attention value cells */}
+              {/* Attention cells */}
               {row.map((value, colIdx) => {
-                const normalized = maxVal > 0 ? value / maxVal : 0
-                const bgOpacity  = Math.min(normalized * 0.9 + 0.05, 0.95)
-                const isHigh     = normalized > 0.5
+                const normalized   = maxVal > 0 ? value / maxVal : 0
+                const bgOpacity    = Math.min(normalized * 0.85 + 0.04, 0.92)
+                const isHigh       = normalized > 0.5
                 const glowStrength = Math.round(normalized * 10)
 
                 return (
                   <div
                     key={`cell-${rowIdx}-${colIdx}`}
-                    title={`[${rowIdx}→${colIdx}] ${value.toFixed(4)}`}
+                    title={`[${rowIdx}→${colIdx}]  ${value.toFixed(4)}`}
                     className={[
-                      'w-8 h-8 border border-tn-border rounded-sm',
+                      'w-9 h-9 rounded-md',
+                      // Soft border instead of hard 1px
+                      'border border-white/5',
                       'transition-all duration-300 ease-in-out',
                       isHigh ? 'animate-pulse-glow' : '',
                     ].join(' ')}
