@@ -1,14 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 
-/**
- * ResponseBox — Bottom completion strip
- *
- * Full-width strip with typewriter animation and a blinking cursor.
- * A CSS scanline overlay adds subtle texture to the output body.
- *
- * Props:
- *   completion — string from /api/analyze
- */
+
 export default function ResponseBox({ completion }) {
   const [displayedText, setDisplayedText] = useState('')
   const [done, setDone] = useState(false)

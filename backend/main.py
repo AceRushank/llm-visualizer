@@ -1,50 +1,21 @@
 import torch
-# Monkey patch for float8_e8m0fnu compatibility between PyTorch and Transformers
+
 if not hasattr(torch, "float8_e8m0fnu"):
     setattr(torch, "float8_e8m0fnu", torch.float32)
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-app = FastAPI(title="LLM Visualizer Backend")
-
-# Enable CORS for frontend development server
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Global variables for model and tokenizer
-tokenizer = None
-model = None
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-
-SYSTEM_PROMPT = (
-    "You are explaining machine learning concepts to a curious beginner who has never "
-    "studied AI. Be conversational, warm, and specific to the data you are given. "
-    "Keep each explanation under 3 sentences. Never use jargon without immediately "
-    "explaining it in plain words."
-)
-
-@app.on_event("startup")
-def load_model():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    
     global tokenizer, model, device
     print(f"Loading tokenizer for {model_name}...")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    
+
     print(f"Loading model {model_name} (preferred device: {device})...")
     try:
         if device == "cuda":
@@ -68,6 +39,42 @@ def load_model():
             attn_implementation="eager"
         ).to("cpu")
     print(f"Model successfully loaded on {device}.")
+    yield  
+    
+
+
+app = FastAPI(title="LLM Visualizer Backend", lifespan=lifespan)
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+tokenizer = None
+model = None
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+
+SYSTEM_PROMPT = (
+    "You are explaining machine learning concepts to a curious beginner who has never "
+    "studied AI. Be conversational, warm, and specific to the data you are given. "
+    "Keep each explanation under 3 sentences. Never use jargon without immediately "
+    "explaining it in plain words."
+)
+
+
 
 class AnalysisRequest(BaseModel):
     text: str
@@ -84,15 +91,15 @@ class PositionAnalysis(BaseModel):
 
 class AnalysisResponse(BaseModel):
     tokens: list[PositionAnalysis]
-    attentions: list[list[list[float]]]  # Shape: [layers, seq_len, seq_len]
+    attentions: list[list[list[float]]]  
     completion: str
 
-# ── /api/explain ───────────────────────────────────────────────────────────────
+
 
 class ExplainRequest(BaseModel):
-    tokens: list[dict]                       # [{token, token_id, alternatives}]
-    first_layer_attention: list[list[float]] # [seq_len, seq_len]
-    last_layer_attention: list[list[float]]  # [seq_len, seq_len]
+    tokens: list[dict]                       
+    first_layer_attention: list[list[float]] 
+    last_layer_attention: list[list[float]]  
 
 class ExplainResponse(BaseModel):
     tokens: str
@@ -100,7 +107,7 @@ class ExplainResponse(BaseModel):
     predictions: str
 
 def _generate_explanation(user_prompt: str, max_new_tokens: int = 110) -> str:
-    """Call TinyLlama with the fixed system prompt and a focused user question."""
+    
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user",   "content": user_prompt},
@@ -110,7 +117,7 @@ def _generate_explanation(user_prompt: str, max_new_tokens: int = 110) -> str:
             messages, tokenize=False, add_generation_prompt=True
         )
     except Exception:
-        # Fallback for tokenizers without a chat template
+        
         chat_text = (
             f"<s>[INST] <<SYS>>\n{SYSTEM_PROMPT}\n<</SYS>>\n\n{user_prompt} [/INST]"
         )
@@ -132,7 +139,7 @@ def _generate_explanation(user_prompt: str, max_new_tokens: int = 110) -> str:
     new_tokens = output_ids[0][input_len:]
     text = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
-    # Strip any stray template markers the model might echo
+    
     for stop_marker in ["</s>", "[/INST]", "<|", "User:", "user:"]:
         if stop_marker in text:
             text = text[: text.index(stop_marker)].strip()
@@ -141,7 +148,7 @@ def _generate_explanation(user_prompt: str, max_new_tokens: int = 110) -> str:
 
 
 def _top_attention_pair(layer_matrix: list[list[float]], token_list: list[dict]):
-    """Return (from_token, to_token, value) for the highest off-diagonal cell."""
+    
     max_val, max_r, max_c = 0.0, 0, 0
     for r, row in enumerate(layer_matrix):
         for c, val in enumerate(row):
@@ -152,6 +159,17 @@ def _top_attention_pair(layer_matrix: list[list[float]], token_list: list[dict])
     return from_tok, to_tok, round(max_val, 3)
 
 
+@app.get("/")
+def health_check():
+    return {
+        "status": "ok",
+        "model": model_name,
+        "device": device,
+        "model_loaded": model is not None,
+        "endpoints": ["/api/analyze", "/api/explain"],
+    }
+
+
 @app.post("/api/explain", response_model=ExplainResponse)
 def explain_analysis(request: ExplainRequest):
     if model is None or tokenizer is None:
@@ -160,7 +178,7 @@ def explain_analysis(request: ExplainRequest):
     tokens = request.tokens
     seq_len = len(tokens)
 
-    # ── Build token context ────────────────────────────────────────────────
+    
     token_strs = [t.get("token", "") for t in tokens[:20]]
     token_list_str = " · ".join(f'"{s}"' for s in token_strs)
     tokens_prompt = (
@@ -168,7 +186,7 @@ def explain_analysis(request: ExplainRequest):
         f"Explain what tokenization is and why the text might have been split this way."
     )
 
-    # ── Build attention context ────────────────────────────────────────────
+    
     fr0, to0, val0 = _top_attention_pair(request.first_layer_attention, tokens)
     frL, toL, valL = _top_attention_pair(request.last_layer_attention, tokens)
     attention_prompt = (
@@ -178,7 +196,7 @@ def explain_analysis(request: ExplainRequest):
         f"Explain what attention means and what this shift between early and late layers tells us."
     )
 
-    # ── Build predictions context ──────────────────────────────────────────
+    
     best_pos, best_token, best_alts = None, None, []
     for t in tokens:
         alts = t.get("alternatives", [])
@@ -199,7 +217,7 @@ def explain_analysis(request: ExplainRequest):
             f"Explain in plain words how a language model decides what to say next."
         )
 
-    # ── Generate three explanations (sequential, focused) ─────────────────
+    
     tokens_exp     = _generate_explanation(tokens_prompt)
     attention_exp  = _generate_explanation(attention_prompt)
     predictions_exp = _generate_explanation(predictions_prompt)
@@ -219,33 +237,33 @@ def analyze_text(request: AnalysisRequest):
     if model is None or tokenizer is None:
         raise HTTPException(status_code=503, detail="Model is still loading or failed to load.")
     
-    # Tokenize input
+    
     inputs = tokenizer(request.text, return_tensors="pt")
-    input_ids = inputs["input_ids"][0]  # shape: (seq_len,)
+    input_ids = inputs["input_ids"][0]  
     seq_len = len(input_ids)
     
-    # Move inputs to target device
+    
     device_inputs = {k: v.to(device) for k, v in inputs.items()}
     
-    # Forward pass
+    
     with torch.no_grad():
         outputs = model(**device_inputs, output_attentions=True)
     
-    # 1. Process attentions
-    # outputs.attentions is a tuple of length num_layers
-    # Each tensor is shape (batch_size, num_heads, seq_len, seq_len)
+    
+    
+    
     mean_attentions = []
     for layer_attn in outputs.attentions:
-        # Mean across head dimension (dim=1) and squeeze batch (dim=0)
-        mean_attn = torch.mean(layer_attn, dim=1).squeeze(0)  # shape: (seq_len, seq_len)
+        
+        mean_attn = torch.mean(layer_attn, dim=1).squeeze(0)  
         mean_attentions.append(mean_attn.cpu().tolist())
     
-    # 2. Extract top-5 alternatives and percentage probabilities
-    # Logits shape: (batch_size, seq_len, vocab_size)
-    logits = outputs.logits[0]  # shape: (seq_len, vocab_size)
-    probs = torch.softmax(logits, dim=-1)  # shape: (seq_len, vocab_size)
     
-    # Decode token strings
+    
+    logits = outputs.logits[0]  
+    probs = torch.softmax(logits, dim=-1)  
+    
+    
     token_strings = [tokenizer.decode([tid]) for tid in input_ids]
     
     tokens_analysis = []
@@ -253,11 +271,11 @@ def analyze_text(request: AnalysisRequest):
         token_id = int(input_ids[i])
         token_str = token_strings[i]
         
-        # Predictions for position i (based on logits at i-1)
-        # Note: Position 0 has no prior context, so alternatives are empty
+        
+        
         alternatives = []
         if i > 0:
-            # We look at predictions from the previous token
+            
             position_probs = probs[i - 1]
             top_probs, top_indices = torch.topk(position_probs, k=5)
             
@@ -276,20 +294,30 @@ def analyze_text(request: AnalysisRequest):
             token_id=token_id,
             alternatives=alternatives
         ))
-    
-    # 3. Generate a clean 50-token completion
+    try:
+        messages = [
+            {"role": "system", "content": "You are a helpful AI assistant. Give short, direct answers under 3 sentences."},
+            {"role": "user", "content": request.text}
+        ]
+        chat_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    except Exception:
+        chat_text = f"<s>[INST] {request.text} [/INST]"
+
+    chat_inputs = tokenizer(chat_text, return_tensors="pt").to(device)
+    chat_len = chat_inputs["input_ids"].shape[1]
+
     with torch.no_grad():
         generate_ids = model.generate(
-            device_inputs["input_ids"],
+            chat_inputs["input_ids"],
             max_new_tokens=50,
             do_sample=True,
             top_k=50,
             top_p=0.95,
             temperature=0.7,
+            pad_token_id=tokenizer.eos_token_id,
         )
-    # We only want the newly generated tokens
-    completion_ids = generate_ids[0][seq_len:]
-    completion_text = tokenizer.decode(completion_ids, skip_special_tokens=True)
+    completion_ids = generate_ids[0][chat_len:]
+    completion_text = tokenizer.decode(completion_ids, skip_special_tokens=True).strip()
     
     return AnalysisResponse(
         tokens=tokens_analysis,
