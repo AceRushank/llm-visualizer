@@ -13,7 +13,14 @@ app = FastAPI(title="LLM Visualizer Backend")
 # Enable CORS for frontend development server
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -24,6 +31,13 @@ tokenizer = None
 model = None
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+
+SYSTEM_PROMPT = (
+    "You are explaining machine learning concepts to a curious beginner who has never "
+    "studied AI. Be conversational, warm, and specific to the data you are given. "
+    "Keep each explanation under 3 sentences. Never use jargon without immediately "
+    "explaining it in plain words."
+)
 
 @app.on_event("startup")
 def load_model():
@@ -72,6 +86,130 @@ class AnalysisResponse(BaseModel):
     tokens: list[PositionAnalysis]
     attentions: list[list[list[float]]]  # Shape: [layers, seq_len, seq_len]
     completion: str
+
+# ── /api/explain ───────────────────────────────────────────────────────────────
+
+class ExplainRequest(BaseModel):
+    tokens: list[dict]                       # [{token, token_id, alternatives}]
+    first_layer_attention: list[list[float]] # [seq_len, seq_len]
+    last_layer_attention: list[list[float]]  # [seq_len, seq_len]
+
+class ExplainResponse(BaseModel):
+    tokens: str
+    attention: str
+    predictions: str
+
+def _generate_explanation(user_prompt: str, max_new_tokens: int = 110) -> str:
+    """Call TinyLlama with the fixed system prompt and a focused user question."""
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user",   "content": user_prompt},
+    ]
+    try:
+        chat_text = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+    except Exception:
+        # Fallback for tokenizers without a chat template
+        chat_text = (
+            f"<s>[INST] <<SYS>>\n{SYSTEM_PROMPT}\n<</SYS>>\n\n{user_prompt} [/INST]"
+        )
+
+    inputs = tokenizer(chat_text, return_tensors="pt").to(device)
+    input_len = inputs["input_ids"].shape[1]
+
+    with torch.no_grad():
+        output_ids = model.generate(
+            inputs["input_ids"],
+            max_new_tokens=max_new_tokens,
+            do_sample=True,
+            temperature=0.75,
+            top_p=0.9,
+            repetition_penalty=1.15,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+
+    new_tokens = output_ids[0][input_len:]
+    text = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+
+    # Strip any stray template markers the model might echo
+    for stop_marker in ["</s>", "[/INST]", "<|", "User:", "user:"]:
+        if stop_marker in text:
+            text = text[: text.index(stop_marker)].strip()
+
+    return text or "No explanation generated."
+
+
+def _top_attention_pair(layer_matrix: list[list[float]], token_list: list[dict]):
+    """Return (from_token, to_token, value) for the highest off-diagonal cell."""
+    max_val, max_r, max_c = 0.0, 0, 0
+    for r, row in enumerate(layer_matrix):
+        for c, val in enumerate(row):
+            if r != c and val > max_val:
+                max_val, max_r, max_c = val, r, c
+    from_tok = token_list[max_r].get("token", "<s>") if max_r < len(token_list) else "?"
+    to_tok   = token_list[max_c].get("token", "<s>") if max_c < len(token_list) else "?"
+    return from_tok, to_tok, round(max_val, 3)
+
+
+@app.post("/api/explain", response_model=ExplainResponse)
+def explain_analysis(request: ExplainRequest):
+    if model is None or tokenizer is None:
+        raise HTTPException(status_code=503, detail="Model is still loading or failed to load.")
+
+    tokens = request.tokens
+    seq_len = len(tokens)
+
+    # ── Build token context ────────────────────────────────────────────────
+    token_strs = [t.get("token", "") for t in tokens[:20]]
+    token_list_str = " · ".join(f'"{s}"' for s in token_strs)
+    tokens_prompt = (
+        f"The AI model split the input into {seq_len} tokens: {token_list_str}. "
+        f"Explain what tokenization is and why the text might have been split this way."
+    )
+
+    # ── Build attention context ────────────────────────────────────────────
+    fr0, to0, val0 = _top_attention_pair(request.first_layer_attention, tokens)
+    frL, toL, valL = _top_attention_pair(request.last_layer_attention, tokens)
+    attention_prompt = (
+        f'In the model\'s earliest layer, the word "{fr0}" paid the most attention to "{to0}" '
+        f'(strength: {val0}). '
+        f'In the final deep layer, "{frL}" focused most strongly on "{toL}" (strength: {valL}). '
+        f"Explain what attention means and what this shift between early and late layers tells us."
+    )
+
+    # ── Build predictions context ──────────────────────────────────────────
+    best_pos, best_token, best_alts = None, None, []
+    for t in tokens:
+        alts = t.get("alternatives", [])
+        if len(alts) >= 2:
+            best_token = t.get("token", "")
+            best_alts  = alts[:3]
+            break
+
+    if best_token and best_alts:
+        alt_str = ", ".join(f'"{a.get("token","")}" ({a.get("probability",0):.1f}%)' for a in best_alts)
+        predictions_prompt = (
+            f'At one position, the AI chose "{best_token}" but also strongly considered: {alt_str}. '
+            f"Explain what these probability scores reveal about how the model decides which word comes next."
+        )
+    else:
+        predictions_prompt = (
+            f"The AI model scores all {32000} possible next tokens and picks the most likely one. "
+            f"Explain in plain words how a language model decides what to say next."
+        )
+
+    # ── Generate three explanations (sequential, focused) ─────────────────
+    tokens_exp     = _generate_explanation(tokens_prompt)
+    attention_exp  = _generate_explanation(attention_prompt)
+    predictions_exp = _generate_explanation(predictions_prompt)
+
+    return ExplainResponse(
+        tokens=tokens_exp,
+        attention=attention_exp,
+        predictions=predictions_exp,
+    )
+
 
 @app.post("/api/analyze", response_model=AnalysisResponse)
 def analyze_text(request: AnalysisRequest):

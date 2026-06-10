@@ -1,18 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react'
 
 /**
- * ResponseBox
- * Renders the model's completion text with a character-by-character
- * typewriter effect at 28ms per character. Ends with a pulsing █ cursor
- * inside a terminal-black card.
+ * ResponseBox — Bottom completion strip
+ *
+ * Full-width strip with typewriter animation and a blinking cursor.
+ * A CSS scanline overlay adds subtle texture to the output body.
  *
  * Props:
  *   completion — string from /api/analyze
  */
 export default function ResponseBox({ completion }) {
   const [displayedText, setDisplayedText] = useState('')
-  const [done, setDone]                   = useState(false)
-  const intervalRef                        = useRef(null)
+  const [done, setDone] = useState(false)
+  const intervalRef = useRef(null)
 
   useEffect(() => {
     if (!completion) {
@@ -21,7 +21,6 @@ export default function ResponseBox({ completion }) {
       return
     }
 
-    // Reset and restart typewriter on new completion
     setDisplayedText('')
     setDone(false)
     let i = 0
@@ -33,36 +32,27 @@ export default function ResponseBox({ completion }) {
         clearInterval(intervalRef.current)
         setDone(true)
       }
-    }, 28)
+    }, 18)
 
     return () => clearInterval(intervalRef.current)
   }, [completion])
 
   return (
-    <div className="rounded-lg border border-tn-border bg-tn-base overflow-hidden">
-      {/* Terminal header bar */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-tn-border bg-tn-panel">
-        <span className="w-2 h-2 rounded-full bg-tn-green animate-pulse shrink-0" />
-        <span className="font-mono text-[10px] text-tn-muted tracking-widest uppercase">
-          ▸ model completion
-        </span>
+    <div className="completion-strip">
+      <div className="completion-header">
+        <span className="panel-icon">▸</span>
+        <span className="micro-label" style={{ marginBottom: 0 }}>Model output</span>
       </div>
-
-      {/* Output body */}
-      <div className="px-5 py-4 font-mono text-sm text-tn-text max-h-64 overflow-y-auto
-                      leading-relaxed whitespace-pre-wrap break-words">
+      <div className="completion-body">
         {completion ? (
           <>
             {displayedText}
-            {/* Blinking block cursor — hidden when typing is done */}
             {!done && (
-              <span className="animate-blink text-tn-purple ml-0.5 select-none">
-                █
-              </span>
+              <span className="completion-cursor">█</span>
             )}
           </>
         ) : (
-          <span className="text-tn-muted italic text-xs">
+          <span className="completion-placeholder">
             Output will appear here after analysis…
           </span>
         )}
