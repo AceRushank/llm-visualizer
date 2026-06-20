@@ -1,4 +1,3 @@
-# Python
 .venv/
 __pycache__/
 *.pyc
@@ -11,12 +10,10 @@ ENV/
 env.bak/
 venv.bak/
 
-# Node/Frontend (if applicable)
 node_modules/
 dist/
 .env
 
-# IDE / System
 .idea/
 .vscode/
 .DS_Store

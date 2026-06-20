@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
 
-
 export default function ResponseBox({ completion }) {
   const [displayedText, setDisplayedText] = useState('')
   const [done, setDone] = useState(false)
@@ -32,16 +31,14 @@ export default function ResponseBox({ completion }) {
   return (
     <div className="completion-strip">
       <div className="completion-header">
-        <span className="panel-icon">▸</span>
-        <span className="micro-label" style={{ marginBottom: 0 }}>Model output</span>
+        <span style={{ fontSize: 14 }}>▸</span>
+        <span className="section-label" style={{ marginBottom: 0 }}>Model Output</span>
       </div>
       <div className="completion-body">
         {completion ? (
           <>
             {displayedText}
-            {!done && (
-              <span className="completion-cursor">█</span>
-            )}
+            {!done && <span className="completion-cursor" />}
           </>
         ) : (
           <span className="completion-placeholder">

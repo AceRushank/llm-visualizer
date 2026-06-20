@@ -1,3 +1,4 @@
+
 import torch
 
 if not hasattr(torch, "float8_e8m0fnu"):
@@ -7,11 +8,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    
+
     global tokenizer, model, device
     print(f"Loading tokenizer for {model_name}...")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -40,11 +42,8 @@ async def lifespan(app: FastAPI):
         ).to("cpu")
     print(f"Model successfully loaded on {device}.")
     yield  
-    
-
 
 app = FastAPI(title="LLM Visualizer Backend", lifespan=lifespan)
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -61,7 +60,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 tokenizer = None
 model = None
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -73,8 +71,6 @@ SYSTEM_PROMPT = (
     "Keep each explanation under 3 sentences. Never use jargon without immediately "
     "explaining it in plain words."
 )
-
-
 
 class AnalysisRequest(BaseModel):
     text: str
@@ -94,8 +90,6 @@ class AnalysisResponse(BaseModel):
     attentions: list[list[list[float]]]  
     completion: str
 
-
-
 class ExplainRequest(BaseModel):
     tokens: list[dict]                       
     first_layer_attention: list[list[float]] 
@@ -107,7 +101,7 @@ class ExplainResponse(BaseModel):
     predictions: str
 
 def _generate_explanation(user_prompt: str, max_new_tokens: int = 110) -> str:
-    
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user",   "content": user_prompt},
@@ -117,7 +111,7 @@ def _generate_explanation(user_prompt: str, max_new_tokens: int = 110) -> str:
             messages, tokenize=False, add_generation_prompt=True
         )
     except Exception:
-        
+
         chat_text = (
             f"<s>[INST] <<SYS>>\n{SYSTEM_PROMPT}\n<</SYS>>\n\n{user_prompt} [/INST]"
         )
@@ -139,16 +133,14 @@ def _generate_explanation(user_prompt: str, max_new_tokens: int = 110) -> str:
     new_tokens = output_ids[0][input_len:]
     text = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
-    
     for stop_marker in ["</s>", "[/INST]", "<|", "User:", "user:"]:
         if stop_marker in text:
             text = text[: text.index(stop_marker)].strip()
 
     return text or "No explanation generated."
 
-
 def _top_attention_pair(layer_matrix: list[list[float]], token_list: list[dict]):
-    
+
     max_val, max_r, max_c = 0.0, 0, 0
     for r, row in enumerate(layer_matrix):
         for c, val in enumerate(row):
@@ -157,7 +149,6 @@ def _top_attention_pair(layer_matrix: list[list[float]], token_list: list[dict])
     from_tok = token_list[max_r].get("token", "<s>") if max_r < len(token_list) else "?"
     to_tok   = token_list[max_c].get("token", "<s>") if max_c < len(token_list) else "?"
     return from_tok, to_tok, round(max_val, 3)
-
 
 @app.get("/")
 def health_check():
@@ -169,7 +160,6 @@ def health_check():
         "endpoints": ["/api/analyze", "/api/explain"],
     }
 
-
 @app.post("/api/explain", response_model=ExplainResponse)
 def explain_analysis(request: ExplainRequest):
     if model is None or tokenizer is None:
@@ -178,7 +168,6 @@ def explain_analysis(request: ExplainRequest):
     tokens = request.tokens
     seq_len = len(tokens)
 
-    
     token_strs = [t.get("token", "") for t in tokens[:20]]
     token_list_str = " · ".join(f'"{s}"' for s in token_strs)
     tokens_prompt = (
@@ -186,7 +175,6 @@ def explain_analysis(request: ExplainRequest):
         f"Explain what tokenization is and why the text might have been split this way."
     )
 
-    
     fr0, to0, val0 = _top_attention_pair(request.first_layer_attention, tokens)
     frL, toL, valL = _top_attention_pair(request.last_layer_attention, tokens)
     attention_prompt = (
@@ -196,7 +184,6 @@ def explain_analysis(request: ExplainRequest):
         f"Explain what attention means and what this shift between early and late layers tells us."
     )
 
-    
     best_pos, best_token, best_alts = None, None, []
     for t in tokens:
         alts = t.get("alternatives", [])
@@ -217,7 +204,6 @@ def explain_analysis(request: ExplainRequest):
             f"Explain in plain words how a language model decides what to say next."
         )
 
-    
     tokens_exp     = _generate_explanation(tokens_prompt)
     attention_exp  = _generate_explanation(attention_prompt)
     predictions_exp = _generate_explanation(predictions_prompt)
@@ -228,66 +214,54 @@ def explain_analysis(request: ExplainRequest):
         predictions=predictions_exp,
     )
 
-
 @app.post("/api/analyze", response_model=AnalysisResponse)
 def analyze_text(request: AnalysisRequest):
     if not request.text:
         raise HTTPException(status_code=400, detail="Text prompt cannot be empty.")
-    
+
     if model is None or tokenizer is None:
         raise HTTPException(status_code=503, detail="Model is still loading or failed to load.")
-    
-    
+
     inputs = tokenizer(request.text, return_tensors="pt")
     input_ids = inputs["input_ids"][0]  
     seq_len = len(input_ids)
-    
-    
+
     device_inputs = {k: v.to(device) for k, v in inputs.items()}
-    
-    
+
     with torch.no_grad():
         outputs = model(**device_inputs, output_attentions=True)
-    
-    
-    
-    
+
     mean_attentions = []
     for layer_attn in outputs.attentions:
-        
+
         mean_attn = torch.mean(layer_attn, dim=1).squeeze(0)  
         mean_attentions.append(mean_attn.cpu().tolist())
-    
-    
-    
+
     logits = outputs.logits[0]  
     probs = torch.softmax(logits, dim=-1)  
-    
-    
+
     token_strings = [tokenizer.decode([tid]) for tid in input_ids]
-    
+
     tokens_analysis = []
     for i in range(seq_len):
         token_id = int(input_ids[i])
         token_str = token_strings[i]
-        
-        
-        
+
         alternatives = []
         if i > 0:
-            
+
             position_probs = probs[i - 1]
             top_probs, top_indices = torch.topk(position_probs, k=5)
-            
+
             top_probs = top_probs.cpu().tolist()
             top_indices = top_indices.cpu().tolist()
-            
+
             for p, idx in zip(top_probs, top_indices):
                 alternatives.append(TokenAlternative(
                     token=tokenizer.decode([idx]),
                     probability=round(p * 100.0, 2)
                 ))
-        
+
         tokens_analysis.append(PositionAnalysis(
             position=i,
             token=token_str,
@@ -318,7 +292,7 @@ def analyze_text(request: AnalysisRequest):
         )
     completion_ids = generate_ids[0][chat_len:]
     completion_text = tokenizer.decode(completion_ids, skip_special_tokens=True).strip()
-    
+
     return AnalysisResponse(
         tokens=tokens_analysis,
         attentions=mean_attentions,
